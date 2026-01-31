@@ -8,15 +8,41 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
-    background: #05060a;
+    background: #000;
     font-family: sans-serif;
     color: #fff;
   }
   canvas {
-    display: block;
+    display: none;
     width: 100vw;
     height: 100vh;
     cursor: crosshair;
+  }
+  #codeScreen {
+    position: fixed;
+    inset: 0;
+    background: #05060a;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+  }
+  input {
+    padding: 10px 20px;
+    font-size: 20px;
+    border-radius: 8px;
+    border: none;
+    outline: none;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    background: #222;
+    color: #fff;
   }
   .hud {
     position: fixed;
@@ -27,17 +53,43 @@
     text-align: center;
     pointer-events: none;
     text-shadow: 0 0 6px #000;
+    display: none;
   }
 </style>
 </head>
 <body>
+
+<div id="codeScreen">
+  <h1>Enter Access Code</h1>
+  <input id="codeInput" placeholder="Enter code...">
+  <button onclick="checkCode()">Enter</button>
+  <p id="error" style="color:red; display:none;">Incorrect code.</p>
+</div>
+
 <canvas id="game"></canvas>
-<div class="hud">
+
+<div class="hud" id="hud">
   <div>WASD: Move • Mouse: Look (click to lock, C to unlock)</div>
   <div>Left Click: Punch • F: Red • B: Blue • L: Hollow Purple</div>
 </div>
 
 <script>
+function checkCode() {
+  const val = document.getElementById("codeInput").value.trim();
+  if (val === "The Monkey Gang") {
+    document.getElementById("codeScreen").style.display = "none";
+    document.getElementById("game").style.display = "block";
+    document.getElementById("hud").style.display = "block";
+    startGame();
+  } else {
+    document.getElementById("error").style.display = "block";
+  }
+}
+
+function startGame() {
+
+// ---------------- GAME STARTS HERE ---------------- //
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
@@ -52,477 +104,384 @@ resize();
 let pointerLocked = false;
 
 canvas.addEventListener('click', () => {
-  if (!pointerLocked) {
-    canvas.requestPointerLock();
-  }
+  if (!pointerLocked) canvas.requestPointerLock();
 });
 
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = (document.pointerLockElement === canvas);
 });
 
-// Player / camera
+// Player
 const player = {
   x: 0,
   y: 1.6,
   z: 0,
   yaw: 0,
   pitch: 0,
-  speed: 3.0,   // units per second
+  speed: 3,
   walkTime: 0
 };
 
 const keys = { w:false, a:false, s:false, d:false };
 
+// Key input
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'w' || e.key === 'W') keys.w = true;
-  if (e.key === 'a' || e.key === 'A') keys.a = true;
-  if (e.key === 's' || e.key === 'S') keys.s = true;
-  if (e.key === 'd' || e.key === 'D') keys.d = true;
+  if (e.key === 'w') keys.w = true;
+  if (e.key === 'a') keys.a = true;
+  if (e.key === 's') keys.s = true;
+  if (e.key === 'd') keys.d = true;
 
-  if (e.key === 'f' || e.key === 'F') spawnOrb('red');
-  if (e.key === 'b' || e.key === 'B') spawnOrb('blue');
-  if (e.key === 'l' || e.key === 'L') spawnOrb('purple');
+  if (e.key === 'f') spawnOrb('red');
+  if (e.key === 'b') spawnOrb('blue');
+  if (e.key === 'l') spawnOrb('purple');
 
-  if (e.key === 'c' || e.key === 'C') {
-    if (pointerLocked) document.exitPointerLock();
-  }
+  if (e.key === 'c') if (pointerLocked) document.exitPointerLock();
 });
 
 document.addEventListener('keyup', (e) => {
-  if (e.key === 'w' || e.key === 'W') keys.w = false;
-  if (e.key === 'a' || e.key === 'A') keys.a = false;
-  if (e.key === 's' || e.key === 'S') keys.s = false;
-  if (e.key === 'd' || e.key === 'D') keys.d = false;
+  if (e.key === 'w') keys.w = false;
+  if (e.key === 'a') keys.a = false;
+  if (e.key === 's') keys.s = false;
+  if (e.key === 'd') keys.d = false;
 });
 
 // Mouse look
 document.addEventListener('mousemove', (e) => {
   if (!pointerLocked) return;
-  const sensitivity = 0.0025;
-  player.yaw   += e.movementX * sensitivity;   // fixed direction
-  player.pitch -= e.movementY * sensitivity;
-  const limit = Math.PI / 2 - 0.1;
-  if (player.pitch > limit) player.pitch = limit;
-  if (player.pitch < -limit) player.pitch = -limit;
+  const s = 0.0025;
+  player.yaw   += e.movementX * s;
+  player.pitch -= e.movementY * s;
+  const lim = Math.PI/2 - 0.1;
+  player.pitch = Math.max(-lim, Math.min(lim, player.pitch));
 });
-
-// Punch
-let punchTimer = 0;
-const punchDuration = 220; // ms
-
-canvas.addEventListener('mousedown', (e) => {
-  if (e.button === 0) {
-    punchTimer = punchDuration;
-    spawnPunchBurst();
-  }
-});
-
-// Orbs and particles
-const orbs = [];
-const particles = [];
-
-// Vectors
-function getForwardVector() {
-  const cp = Math.cos(player.pitch);
-  const sp = Math.sin(player.pitch);
-  const cy = Math.cos(player.yaw);
-  const sy = Math.sin(player.yaw);
-  return {
-    x: -sy * cp,
-    y: sp,
-    z: -cy * cp
-  };
-}
-
-function getRightVector() {
-  const cy = Math.cos(player.yaw);
-  const sy = Math.sin(player.yaw);
-  return { x: cy, y: 0, z: -sy };
-}
-
-function getUpVector() {
-  const f = getForwardVector();
-  const r = getRightVector();
-  // up = r x f
-  return {
-    x: r.y * f.z - r.z * f.y,
-    y: r.z * f.x - r.x * f.z,
-    z: r.x * f.y - r.y * f.x
-  };
-}
-
-// Hand world position (for cursed energy origin)
-function getHandWorldPosition() {
-  const forward = getForwardVector();
-  const right = getRightVector();
-  const up = getUpVector();
-
-  return {
-    x: player.x + forward.x * 0.4 + right.x * 0.25 + up.x * -0.1,
-    y: player.y + forward.y * 0.4 + right.y * 0.25 + up.y * -0.1,
-    z: player.z + forward.z * 0.4 + right.z * 0.25 + up.z * -0.1
-  };
-}
-
-// Projection
-function projectPoint(x, y, z) {
-  const dx = x - player.x;
-  const dy = y - player.y;
-  const dz = z - player.z;
-
-  const cosY = Math.cos(player.yaw);
-  const sinY = Math.sin(player.yaw);
-  const cosP = Math.cos(player.pitch);
-  const sinP = Math.sin(player.pitch);
-
-  // yaw
-  let cx =  cosY * dx - sinY * dz;
-  let cz =  sinY * dx + cosY * dz;
-  let cy = dy;
-
-  // pitch
-  let cy2 =  cosP * cy - sinP * cz;
-  let cz2 =  sinP * cy + cosP * cz;
-
-  if (cz2 <= 0.01) return null;
-
-  const f = canvas.height * 0.9;
-  const sx = canvas.width / 2 + (cx / cz2) * f;
-  const sy = canvas.height / 2 - (cy2 / cz2) * f;
-
-  return { x: sx, y: sy, depth: cz2 };
-}
 
 // Movement
-function updatePlayer(dtMs) {
-  const dt = dtMs / 1000; // seconds
+function updatePlayer(dt) {
+  const dtS = dt / 1000;
+  let mx = 0, mz = 0;
 
-  let moveX = 0;
-  let moveZ = 0;
-  if (keys.w) moveZ -= 1;
-  if (keys.s) moveZ += 1;
-  if (keys.a) moveX -= 1;
-  if (keys.d) moveX += 1;
+  if (keys.w) mz -= 1;
+  if (keys.s) mz += 1;
+  if (keys.a) mx -= 1;
+  if (keys.d) mx += 1;
 
-  if (moveX !== 0 || moveZ !== 0) {
-    const len = Math.hypot(moveX, moveZ);
-    moveX /= len;
-    moveZ /= len;
+  if (mx !== 0 || mz !== 0) {
+    const len = Math.hypot(mx, mz);
+    mx /= len; mz /= len;
 
-    const yaw = player.yaw;
-    const cosY = Math.cos(yaw);
-    const sinY = Math.sin(yaw);
+    const dx = mz * Math.sin(player.yaw) + mx * Math.cos(player.yaw);
+    const dz = mz * Math.cos(player.yaw) - mx * Math.sin(player.yaw);
 
-    const worldDX = moveX * cosY - moveZ * sinY;
-    const worldDZ = moveX * sinY + moveZ * cosY;
+    player.x += dx * player.speed * dtS;
+    player.z += dz * player.speed * dtS;
 
-    player.x += worldDX * player.speed * dt;
-    player.z += worldDZ * player.speed * dt;
-
-    player.walkTime += dt * 6;
+    player.walkTime += dtS * 6;
   } else {
     player.walkTime = 0;
   }
 }
 
-// Punch burst from hand
-function spawnPunchBurst() {
-  const hand = getHandWorldPosition();
-  const dir = getForwardVector();
+// Vectors
+function forwardVec() {
+  const cp = Math.cos(player.pitch);
+  const sp = Math.sin(player.pitch);
+  const cy = Math.cos(player.yaw);
+  const sy = Math.sin(player.yaw);
+  return { x:-sy*cp, y:sp, z:-cy*cp };
+}
+function rightVec() {
+  return { x:Math.cos(player.yaw), y:0, z:-Math.sin(player.yaw) };
+}
+function upVec() {
+  const f = forwardVec();
+  const r = rightVec();
+  return {
+    x: r.y*f.z - r.z*f.y,
+    y: r.z*f.x - r.x*f.z,
+    z: r.x*f.y - r.y*f.x
+  };
+}
 
-  for (let i = 0; i < 25; i++) {
+// Hand world position
+function handPos() {
+  const f = forwardVec();
+  const r = rightVec();
+  const u = upVec();
+  return {
+    x: player.x + f.x*0.4 + r.x*0.25 + u.x*-0.1,
+    y: player.y + f.y*0.4 + r.y*0.25 + u.y*-0.1,
+    z: player.z + f.z*0.4 + r.z*0.25 + u.z*-0.1
+  };
+}
+
+// Projection
+function project(x,y,z) {
+  const dx = x - player.x;
+  const dy = y - player.y;
+  const dz = z - player.z;
+
+  const cy = Math.cos(player.yaw);
+  const sy = Math.sin(player.yaw);
+  const cp = Math.cos(player.pitch);
+  const sp = Math.sin(player.pitch);
+
+  let cx = cy*dx - sy*dz;
+  let cz = sy*dx + cy*dz;
+  let cy2 = dy;
+
+  let cy3 = cp*cy2 - sp*cz;
+  let cz3 = sp*cy2 + cp*cz;
+
+  if (cz3 <= 0.01) return null;
+
+  const f = canvas.height * 0.9;
+  return {
+    x: canvas.width/2 + (cx/cz3)*f,
+    y: canvas.height/2 - (cy3/cz3)*f,
+    d: cz3
+  };
+}
+
+// Punch
+let punchTimer = 0;
+const punchDur = 220;
+
+canvas.addEventListener('mousedown', () => {
+  punchTimer = punchDur;
+  spawnPunch();
+});
+
+// Particles
+const particles = [];
+const orbs = [];
+
+function spawnPunch() {
+  const h = handPos();
+  const f = forwardVec();
+  for (let i=0;i<25;i++) {
     particles.push({
-      x: hand.x,
-      y: hand.y,
-      z: hand.z,
-      vx: dir.x * 2 + (Math.random() - 0.5) * 1,
-      vy: dir.y * 2 + (Math.random() - 0.5) * 1,
-      vz: dir.z * 2 + (Math.random() - 0.5) * 1,
-      life: 0.4 + Math.random() * 0.2, // seconds
-      age: 0,
-      color: 'rgba(120,220,255,1)'
+      x:h.x, y:h.y, z:h.z,
+      vx:f.x*2 + (Math.random()-0.5),
+      vy:f.y*2 + (Math.random()-0.5),
+      vz:f.z*2 + (Math.random()-0.5),
+      life:0.4 + Math.random()*0.2,
+      age:0,
+      color:'rgba(120,220,255,1)'
     });
   }
 }
 
-// Orbs
 function spawnOrb(type) {
-  const hand = getHandWorldPosition();
-  const dir = getForwardVector();
+  const h = handPos();
+  const f = forwardVec();
   orbs.push({
     type,
-    x: hand.x,
-    y: hand.y,
-    z: hand.z,
-    vx: dir.x * 6,
-    vy: dir.y * 6,
-    vz: dir.z * 6,
-    life: 2.0,
-    age: 0
+    x:h.x + f.x*0.2,
+    y:h.y + f.y*0.2,
+    z:h.z + f.z*0.2,
+    vx:f.x*2,
+    vy:f.y*2,
+    vz:f.z*2,
+    age:0,
+    life:2
   });
-}
-
-function spawnOrbTrail(orb) {
-  for (let i = 0; i < 4; i++) {
-    let color;
-    if (orb.type === 'red') color = 'rgba(255,60,80,1)';
-    else if (orb.type === 'blue') color = 'rgba(80,160,255,1)';
-    else color = 'rgba(200,120,255,1)';
-
-    particles.push({
-      x: orb.x,
-      y: orb.y,
-      z: orb.z,
-      vx: (Math.random() - 0.5) * 1,
-      vy: (Math.random() - 0.5) * 1,
-      vz: (Math.random() - 0.5) * 1,
-      life: 0.5 + Math.random() * 0.3,
-      age: 0,
-      color
-    });
-  }
 }
 
 // Arena
 function drawArena() {
-  const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  g.addColorStop(0, '#05060a');
-  g.addColorStop(0.5, '#101322');
-  g.addColorStop(1, '#05060a');
+  // Dark cursed sky
+  const g = ctx.createLinearGradient(0,0,0,canvas.height);
+  g.addColorStop(0,'#0b0c10');
+  g.addColorStop(1,'#050608');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // Floor grid
-  ctx.lineWidth = 1;
-  for (let gx = -20; gx <= 20; gx++) {
-    const p1 = projectPoint(gx, 0, -20);
-    const p2 = projectPoint(gx, 0,  20);
-    if (p1 && p2) {
-      ctx.strokeStyle = 'rgba(40,60,90,0.7)';
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
-    }
-  }
-  for (let gz = -20; gz <= 20; gz++) {
-    const p1 = projectPoint(-20, 0, gz);
-    const p2 = projectPoint( 20, 0, gz);
-    if (p1 && p2) {
-      ctx.strokeStyle = 'rgba(40,60,90,0.7)';
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
-    }
+  // Cracked floor
+  ctx.strokeStyle = 'rgba(60,60,70,0.4)';
+  for (let i=0;i<40;i++) {
+    ctx.beginPath();
+    ctx.moveTo(Math.random()*canvas.width, Math.random()*canvas.height);
+    ctx.lineTo(Math.random()*canvas.width, Math.random()*canvas.height);
+    ctx.stroke();
   }
 
-  // Simple arena walls
-  const wallY1 = 0;
-  const wallY2 = 3;
-  const size = 12;
+  // Walls
   const walls = [
-    { x1:-size, z1:-size, x2:size, z2:-size },
-    { x1:-size, z1: size, x2:size, z2: size },
-    { x1:-size, z1:-size, x2:-size, z2:size },
-    { x1: size, z1:-size, x2:size, z2:size }
+    [-12,0,-12, 12,0,-12],
+    [-12,0, 12, 12,0, 12],
+    [-12,0,-12,-12,0, 12],
+    [ 12,0,-12, 12,0, 12]
   ];
+
+  ctx.fillStyle = 'rgba(20,20,30,0.9)';
+  ctx.strokeStyle = 'rgba(80,80,110,0.4)';
   ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(90,120,180,0.9)';
-  walls.forEach(w => {
-    const top1 = projectPoint(w.x1, wallY2, w.z1);
-    const top2 = projectPoint(w.x2, wallY2, w.z2);
-    const bot1 = projectPoint(w.x1, wallY1, w.z1);
-    const bot2 = projectPoint(w.x2, wallY1, w.z2);
-    if (top1 && top2 && bot1 && bot2) {
+
+  for (let w of walls) {
+    const [x1,y1,z1, x2,y2,z2] = w;
+    const p1 = project(x1,0,z1);
+    const p2 = project(x2,0,z2);
+    const p3 = project(x2,3,z2);
+    const p4 = project(x1,3,z1);
+    if (p1&&p2&&p3&&p4) {
       ctx.beginPath();
-      ctx.moveTo(bot1.x, bot1.y);
-      ctx.lineTo(bot2.x, bot2.y);
-      ctx.lineTo(top2.x, top2.y);
-      ctx.lineTo(top1.x, top1.y);
+      ctx.moveTo(p1.x,p1.y);
+      ctx.lineTo(p2.x,p2.y);
+      ctx.lineTo(p3.x,p3.y);
+      ctx.lineTo(p4.x,p4.y);
       ctx.closePath();
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(20,30,60,0.6)';
       ctx.fill();
+      ctx.stroke();
     }
-  });
+  }
 }
 
 // Draw orbs
-function drawOrbs(dtMs) {
-  const dt = dtMs / 1000;
-  for (let i = orbs.length - 1; i >= 0; i--) {
+function drawOrbs(dt) {
+  const dtS = dt/1000;
+  for (let i=orbs.length-1;i>=0;i--) {
     const o = orbs[i];
-    o.age += dt;
-    if (o.age > o.life) {
-      orbs.splice(i, 1);
-      continue;
-    }
-    o.x += o.vx * dt;
-    o.y += o.vy * dt;
-    o.z += o.vz * dt;
+    o.age += dtS;
+    if (o.age > o.life) { orbs.splice(i,1); continue; }
 
-    spawnOrbTrail(o);
+    o.x += o.vx*dtS;
+    o.y += o.vy*dtS;
+    o.z += o.vz*dtS;
 
-    const p = projectPoint(o.x, o.y, o.z);
+    const p = project(o.x,o.y,o.z);
     if (!p) continue;
 
-    const baseSize = 40;
-    const size = baseSize / (p.depth * 0.4);
-    let grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size);
+    const size = 40/(p.d*0.4);
+    const grad = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,size);
 
-    if (o.type === 'red') {
-      grad.addColorStop(0, 'rgba(255,200,200,1)');
-      grad.addColorStop(0.4, 'rgba(255,60,60,1)');
-      grad.addColorStop(1, 'rgba(120,0,0,0)');
-    } else if (o.type === 'blue') {
-      grad.addColorStop(0, 'rgba(200,220,255,1)');
-      grad.addColorStop(0.4, 'rgba(80,140,255,1)');
-      grad.addColorStop(1, 'rgba(0,40,120,0)');
+    if (o.type==='red') {
+      grad.addColorStop(0,'rgba(255,200,200,1)');
+      grad.addColorStop(0.4,'rgba(255,60,60,1)');
+      grad.addColorStop(1,'rgba(120,0,0,0)');
+    } else if (o.type==='blue') {
+      grad.addColorStop(0,'rgba(200,220,255,1)');
+      grad.addColorStop(0.4,'rgba(80,140,255,1)');
+      grad.addColorStop(1,'rgba(0,40,120,0)');
     } else {
-      grad.addColorStop(0, 'rgba(255,240,255,1)');
-      grad.addColorStop(0.3, 'rgba(200,120,255,1)');
-      grad.addColorStop(0.6, 'rgba(120,60,255,0.8)');
-      grad.addColorStop(1, 'rgba(40,0,80,0)');
+      grad.addColorStop(0,'rgba(255,240,255,1)');
+      grad.addColorStop(0.3,'rgba(200,120,255,1)');
+      grad.addColorStop(0.6,'rgba(120,60,255,0.8)');
+      grad.addColorStop(1,'rgba(40,0,80,0)');
     }
 
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+    ctx.arc(p.x,p.y,size,0,Math.PI*2);
     ctx.fill();
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, size * 0.7, 0, Math.PI * 2);
-    ctx.stroke();
   }
 }
 
 // Draw particles
-function drawParticles(dtMs) {
-  const dt = dtMs / 1000;
-  for (let i = particles.length - 1; i >= 0; i--) {
+function drawParticles(dt) {
+  const dtS = dt/1000;
+  for (let i=particles.length-1;i>=0;i--) {
     const pa = particles[i];
-    pa.age += dt;
-    if (pa.age > pa.life) {
-      particles.splice(i, 1);
-      continue;
-    }
-    pa.x += pa.vx * dt;
-    pa.y += pa.vy * dt;
-    pa.z += pa.vz * dt;
+    pa.age += dtS;
+    if (pa.age > pa.life) { particles.splice(i,1); continue; }
 
-    const p = projectPoint(pa.x, pa.y, pa.z);
+    pa.x += pa.vx*dtS;
+    pa.y += pa.vy*dtS;
+    pa.z += pa.vz*dtS;
+
+    const p = project(pa.x,pa.y,pa.z);
     if (!p) continue;
 
-    const t = 1 - pa.age / pa.life;
-    const size = 12 * t / (p.depth * 0.5);
+    const t = 1 - pa.age/pa.life;
+    const size = 12*t/(p.d*0.5);
+
     ctx.save();
     ctx.globalAlpha = t;
     ctx.fillStyle = pa.color;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+    ctx.arc(p.x,p.y,size,0,Math.PI*2);
     ctx.fill();
     ctx.restore();
   }
 }
 
-// Hand (cartoony four-fingered, bobbing + punch)
-function drawHand(dtMs) {
-  if (punchTimer > 0) {
-    punchTimer -= dtMs;
-    if (punchTimer < 0) punchTimer = 0;
-  }
+// Hand
+function drawHand(dt) {
+  if (punchTimer>0) punchTimer -= dt;
 
-  const bob = Math.sin(player.walkTime * 6) * 8;
-  const sway = Math.cos(player.walkTime * 3) * 6;
+  const bob = Math.sin(player.walkTime*6)*8;
+  const sway = Math.cos(player.walkTime*3)*6;
 
-  const punchT = Math.max(0, punchTimer / punchDuration);
-  const punchOffset = (1 - punchT) * 40;
-  const punchLift = (1 - punchT) * 20;
-  const punchScale = 1 + (1 - punchT) * 0.2;
+  const t = Math.max(0,punchTimer/punchDur);
+  const punchOff = (1-t)*40;
+  const punchLift = (1-t)*20;
+  const punchScale = 1+(1-t)*0.2;
 
-  const baseX = canvas.width * 0.72 + punchOffset + sway;
-  const baseY = canvas.height * 0.78 - punchLift + bob;
-  const scale = punchScale;
+  const x = canvas.width*0.72 + punchOff + sway;
+  const y = canvas.height*0.78 - punchLift + bob;
 
   ctx.save();
-  ctx.translate(baseX, baseY);
-  ctx.scale(scale, scale);
+  ctx.translate(x,y);
+  ctx.scale(punchScale,punchScale);
 
-  ctx.fillStyle = '#f4c49a';
-  ctx.strokeStyle = '#d89a6a';
-  ctx.lineWidth = 3;
+  ctx.fillStyle='#f4c49a';
+  ctx.strokeStyle='#d89a6a';
+  ctx.lineWidth=3;
 
-  // Palm
-  if (ctx.roundRect) {
-    ctx.beginPath();
-    ctx.roundRect(-40, -40, 80, 70, 20);
-    ctx.fill();
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.rect(-40, -40, 80, 70);
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  // Fingers
-  const fingerWidth = 16;
-  const fingerHeight = 40;
-  const gap = 4;
-  const startX = -(2 * fingerWidth + 1.5 * gap);
-  for (let i = 0; i < 4; i++) {
-    const fx = startX + i * (fingerWidth + gap);
-    ctx.beginPath();
-    if (ctx.roundRect) {
-      ctx.roundRect(fx, -40 - fingerHeight, fingerWidth, fingerHeight, 8);
-    } else {
-      ctx.rect(fx, -40 - fingerHeight, fingerWidth, fingerHeight);
-    }
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  // Thumb
   ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(30, -20, 26, 40, 14);
-  } else {
-    ctx.rect(30, -20, 26, 40);
+  ctx.roundRect(-40,-40,80,70,20);
+  ctx.fill(); ctx.stroke();
+
+  const fw=16, fh=40, gap=4;
+  const sx = -(2*fw + 1.5*gap);
+  for (let i=0;i<4;i++) {
+    const fx = sx + i*(fw+gap);
+    ctx.beginPath();
+    ctx.roundRect(fx,-40-fh,fw,fh,8);
+    ctx.fill(); ctx.stroke();
   }
-  ctx.fill();
-  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.roundRect(30,-20,26,40,14);
+  ctx.fill(); ctx.stroke();
 
   ctx.restore();
 }
 
 // Crosshair
 function drawCrosshair() {
-  const x = canvas.width / 2;
-  const y = canvas.height / 2;
-
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 2;
+  const x = canvas.width/2;
+  const y = canvas.height/2;
+  ctx.strokeStyle='white';
+  ctx.lineWidth=2;
 
   ctx.beginPath();
-  ctx.moveTo(x - 10, y);
-  ctx.lineTo(x + 10, y);
+  ctx.moveTo(x-10,y);
+  ctx.lineTo(x+10,y);
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.moveTo(x, y - 10);
-  ctx.lineTo(x, y + 10);
+  ctx.moveTo(x,y-10);
+  ctx.lineTo(x,y+10);
   ctx.stroke();
 }
 
+// Fog
+function drawFog() {
+  const fog = ctx.createRadialGradient(
+    canvas.width/2, canvas.height/2, 50,
+    canvas.width/2, canvas.height/2, canvas.width
+  );
+  fog.addColorStop(0,'rgba(0,0,0,0)');
+  fog.addColorStop(1,'rgba(0,0,0,0.4)');
+  ctx.fillStyle=fog;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+
 // Main loop
-let lastTime = performance.now();
+let last = performance.now();
 function loop(now) {
-  const dt = now - lastTime;
-  lastTime = now;
+  const dt = now-last;
+  last = now;
 
   updatePlayer(dt);
   drawArena();
@@ -530,10 +489,14 @@ function loop(now) {
   drawParticles(dt);
   drawHand(dt);
   drawCrosshair();
+  drawFog();
 
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+
+} // END GAME START
 </script>
+
 </body>
 </html>
