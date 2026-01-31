@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>JJK First Person Arena (No Three.js)</title>
+<title>JJK First Person Arena</title>
 <style>
   html, body {
     margin: 0;
@@ -61,14 +61,15 @@ document.addEventListener('pointerlockchange', () => {
   pointerLocked = (document.pointerLockElement === canvas);
 });
 
-// Camera / player
+// Player / camera
 const player = {
   x: 0,
   y: 1.6,
   z: 0,
   yaw: 0,
   pitch: 0,
-  speed: 0.12
+  speed: 3.0,   // units per second
+  walkTime: 0
 };
 
 const keys = { w:false, a:false, s:false, d:false };
@@ -99,7 +100,7 @@ document.addEventListener('keyup', (e) => {
 document.addEventListener('mousemove', (e) => {
   if (!pointerLocked) return;
   const sensitivity = 0.0025;
-  player.yaw   -= e.movementX * sensitivity;
+  player.yaw   += e.movementX * sensitivity;   // fixed direction
   player.pitch -= e.movementY * sensitivity;
   const limit = Math.PI / 2 - 0.1;
   if (player.pitch > limit) player.pitch = limit;
@@ -109,7 +110,6 @@ document.addEventListener('mousemove', (e) => {
 // Punch
 let punchTimer = 0;
 const punchDuration = 220; // ms
-const punchParticles = [];
 
 canvas.addEventListener('mousedown', (e) => {
   if (e.button === 0) {
@@ -118,75 +118,9 @@ canvas.addEventListener('mousedown', (e) => {
   }
 });
 
-// Orbs
+// Orbs and particles
 const orbs = [];
-
-function spawnOrb(type) {
-  const dir = getForwardVector();
-  orbs.push({
-    type,
-    x: player.x + dir.x * 0.6,
-    y: player.y + dir.y * 0.6,
-    z: player.z + dir.z * 0.6,
-    vx: dir.x * 0.35,
-    vy: dir.y * 0.35,
-    vz: dir.z * 0.35,
-    life: 2000,
-    age: 0
-  });
-}
-
-// Particles
 const particles = [];
-
-function spawnPunchBurst() {
-  const count = 25;
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 0.004 + Math.random() * 0.01;
-    const dir = getForwardVector();
-    // spawn near camera, slightly to right (hand side)
-    const right = getRightVector();
-    const up = getUpVector();
-    const baseX = player.x + dir.x * 0.4 + right.x * 0.25 + up.x * -0.1;
-    const baseY = player.y + dir.y * 0.4 + right.y * 0.25 + up.y * -0.1;
-    const baseZ = player.z + dir.z * 0.4 + right.z * 0.25 + up.z * -0.1;
-
-    particles.push({
-      x: baseX,
-      y: baseY,
-      z: baseZ,
-      vx: dir.x * speed + Math.cos(angle) * 0.01,
-      vy: dir.y * speed + (Math.random() - 0.5) * 0.01,
-      vz: dir.z * speed + Math.sin(angle) * 0.01,
-      life: 400 + Math.random() * 200,
-      age: 0,
-      color: 'rgba(120,220,255,1)'
-    });
-  }
-}
-
-function spawnOrbTrail(orb) {
-  const count = 4;
-  for (let i = 0; i < count; i++) {
-    let color;
-    if (orb.type === 'red') color = 'rgba(255,60,80,1)';
-    else if (orb.type === 'blue') color = 'rgba(80,160,255,1)';
-    else color = 'rgba(200,120,255,1)';
-
-    particles.push({
-      x: orb.x,
-      y: orb.y,
-      z: orb.z,
-      vx: (Math.random() - 0.5) * 0.01,
-      vy: (Math.random() - 0.5) * 0.01,
-      vz: (Math.random() - 0.5) * 0.01,
-      life: 500 + Math.random() * 300,
-      age: 0,
-      color
-    });
-  }
-}
 
 // Vectors
 function getForwardVector() {
@@ -218,9 +152,21 @@ function getUpVector() {
   };
 }
 
+// Hand world position (for cursed energy origin)
+function getHandWorldPosition() {
+  const forward = getForwardVector();
+  const right = getRightVector();
+  const up = getUpVector();
+
+  return {
+    x: player.x + forward.x * 0.4 + right.x * 0.25 + up.x * -0.1,
+    y: player.y + forward.y * 0.4 + right.y * 0.25 + up.y * -0.1,
+    z: player.z + forward.z * 0.4 + right.z * 0.25 + up.z * -0.1
+  };
+}
+
 // Projection
 function projectPoint(x, y, z) {
-  // Transform to camera space
   const dx = x - player.x;
   const dy = y - player.y;
   const dz = z - player.z;
@@ -230,16 +176,16 @@ function projectPoint(x, y, z) {
   const cosP = Math.cos(player.pitch);
   const sinP = Math.sin(player.pitch);
 
-  // Yaw
+  // yaw
   let cx =  cosY * dx - sinY * dz;
   let cz =  sinY * dx + cosY * dz;
   let cy = dy;
 
-  // Pitch
+  // pitch
   let cy2 =  cosP * cy - sinP * cz;
   let cz2 =  sinP * cy + cosP * cz;
 
-  if (cz2 <= 0.01) return null; // behind camera
+  if (cz2 <= 0.01) return null;
 
   const f = canvas.height * 0.9;
   const sx = canvas.width / 2 + (cx / cz2) * f;
@@ -249,7 +195,9 @@ function projectPoint(x, y, z) {
 }
 
 // Movement
-function updatePlayer(dt) {
+function updatePlayer(dtMs) {
+  const dt = dtMs / 1000; // seconds
+
   let moveX = 0;
   let moveZ = 0;
   if (keys.w) moveZ -= 1;
@@ -271,12 +219,73 @@ function updatePlayer(dt) {
 
     player.x += worldDX * player.speed * dt;
     player.z += worldDZ * player.speed * dt;
+
+    player.walkTime += dt * 6;
+  } else {
+    player.walkTime = 0;
   }
 }
 
-// Arena drawing (simple floor grid)
+// Punch burst from hand
+function spawnPunchBurst() {
+  const hand = getHandWorldPosition();
+  const dir = getForwardVector();
+
+  for (let i = 0; i < 25; i++) {
+    particles.push({
+      x: hand.x,
+      y: hand.y,
+      z: hand.z,
+      vx: dir.x * 2 + (Math.random() - 0.5) * 1,
+      vy: dir.y * 2 + (Math.random() - 0.5) * 1,
+      vz: dir.z * 2 + (Math.random() - 0.5) * 1,
+      life: 0.4 + Math.random() * 0.2, // seconds
+      age: 0,
+      color: 'rgba(120,220,255,1)'
+    });
+  }
+}
+
+// Orbs
+function spawnOrb(type) {
+  const hand = getHandWorldPosition();
+  const dir = getForwardVector();
+  orbs.push({
+    type,
+    x: hand.x,
+    y: hand.y,
+    z: hand.z,
+    vx: dir.x * 6,
+    vy: dir.y * 6,
+    vz: dir.z * 6,
+    life: 2.0,
+    age: 0
+  });
+}
+
+function spawnOrbTrail(orb) {
+  for (let i = 0; i < 4; i++) {
+    let color;
+    if (orb.type === 'red') color = 'rgba(255,60,80,1)';
+    else if (orb.type === 'blue') color = 'rgba(80,160,255,1)';
+    else color = 'rgba(200,120,255,1)';
+
+    particles.push({
+      x: orb.x,
+      y: orb.y,
+      z: orb.z,
+      vx: (Math.random() - 0.5) * 1,
+      vy: (Math.random() - 0.5) * 1,
+      vz: (Math.random() - 0.5) * 1,
+      life: 0.5 + Math.random() * 0.3,
+      age: 0,
+      color
+    });
+  }
+}
+
+// Arena
 function drawArena() {
-  // Sky
   const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
   g.addColorStop(0, '#05060a');
   g.addColorStop(0.5, '#101322');
@@ -309,15 +318,13 @@ function drawArena() {
     }
   }
 
-  // Simple arena walls (square)
+  // Simple arena walls
   const wallY1 = 0;
   const wallY2 = 3;
   const size = 12;
   const walls = [
-    // front/back
     { x1:-size, z1:-size, x2:size, z2:-size },
     { x1:-size, z1: size, x2:size, z2: size },
-    // left/right
     { x1:-size, z1:-size, x2:-size, z2:size },
     { x1: size, z1:-size, x2:size, z2:size }
   ];
@@ -343,7 +350,8 @@ function drawArena() {
 }
 
 // Draw orbs
-function drawOrbs(dt) {
+function drawOrbs(dtMs) {
+  const dt = dtMs / 1000;
   for (let i = orbs.length - 1; i >= 0; i--) {
     const o = orbs[i];
     o.age += dt;
@@ -362,31 +370,28 @@ function drawOrbs(dt) {
 
     const baseSize = 40;
     const size = baseSize / (p.depth * 0.4);
-    let grad;
+    let grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size);
+
     if (o.type === 'red') {
-      grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size);
-      grad.addColorStop(0, 'rgba(255,200,220,1)');
-      grad.addColorStop(0.4, 'rgba(255,80,100,1)');
-      grad.addColorStop(1, 'rgba(120,0,20,0)');
+      grad.addColorStop(0, 'rgba(255,200,200,1)');
+      grad.addColorStop(0.4, 'rgba(255,60,60,1)');
+      grad.addColorStop(1, 'rgba(120,0,0,0)');
     } else if (o.type === 'blue') {
-      grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size);
-      grad.addColorStop(0, 'rgba(220,240,255,1)');
-      grad.addColorStop(0.4, 'rgba(80,160,255,1)');
+      grad.addColorStop(0, 'rgba(200,220,255,1)');
+      grad.addColorStop(0.4, 'rgba(80,140,255,1)');
       grad.addColorStop(1, 'rgba(0,40,120,0)');
     } else {
-      // Hollow purple: swirl of red + blue
-      grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size);
       grad.addColorStop(0, 'rgba(255,240,255,1)');
       grad.addColorStop(0.3, 'rgba(200,120,255,1)');
       grad.addColorStop(0.6, 'rgba(120,60,255,0.8)');
       grad.addColorStop(1, 'rgba(40,0,80,0)');
     }
+
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
     ctx.fill();
 
-    // Outline
     ctx.strokeStyle = 'rgba(255,255,255,0.4)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -396,7 +401,8 @@ function drawOrbs(dt) {
 }
 
 // Draw particles
-function drawParticles(dt) {
+function drawParticles(dtMs) {
+  const dt = dtMs / 1000;
   for (let i = particles.length - 1; i >= 0; i--) {
     const pa = particles[i];
     pa.age += dt;
@@ -423,64 +429,93 @@ function drawParticles(dt) {
   }
 }
 
-// Draw hand (cartoony four-fingered)
-function drawHand(dt) {
+// Hand (cartoony four-fingered, bobbing + punch)
+function drawHand(dtMs) {
   if (punchTimer > 0) {
-    punchTimer -= dt;
+    punchTimer -= dtMs;
     if (punchTimer < 0) punchTimer = 0;
   }
-  const t = 1 - punchTimer / punchDuration; // 1 at rest, 0 at start punch
-  const punchOffset = (1 - t) * 40;
-  const punchLift = (1 - t) * 20;
-  const punchScale = 1 + (1 - t) * 0.2;
 
-  const baseX = canvas.width * 0.72 + punchOffset;
-  const baseY = canvas.height * 0.78 - punchLift;
-  const scale = 1.0 * punchScale;
+  const bob = Math.sin(player.walkTime * 6) * 8;
+  const sway = Math.cos(player.walkTime * 3) * 6;
+
+  const punchT = Math.max(0, punchTimer / punchDuration);
+  const punchOffset = (1 - punchT) * 40;
+  const punchLift = (1 - punchT) * 20;
+  const punchScale = 1 + (1 - punchT) * 0.2;
+
+  const baseX = canvas.width * 0.72 + punchOffset + sway;
+  const baseY = canvas.height * 0.78 - punchLift + bob;
+  const scale = punchScale;
 
   ctx.save();
   ctx.translate(baseX, baseY);
   ctx.scale(scale, scale);
 
-  // Palm
   ctx.fillStyle = '#f4c49a';
   ctx.strokeStyle = '#d89a6a';
   ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.roundRect(-40, -40, 80, 70, 20);
-  ctx.fill();
-  ctx.stroke();
 
-  // Fingers (4)
-  const fingerWidth = 16;
-  const fingerHeight = 40;
-  const gap = 4;
-  const startX = - (2 * fingerWidth + 1.5 * gap);
-  for (let i = 0; i < 4; i++) {
-    const fx = startX + i * (fingerWidth + gap);
+  // Palm
+  if (ctx.roundRect) {
     ctx.beginPath();
-    ctx.roundRect(fx, -40 - fingerHeight, fingerWidth, fingerHeight, 8);
+    ctx.roundRect(-40, -40, 80, 70, 20);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.rect(-40, -40, 80, 70);
     ctx.fill();
     ctx.stroke();
   }
 
-  // Thumb (side)
+  // Fingers
+  const fingerWidth = 16;
+  const fingerHeight = 40;
+  const gap = 4;
+  const startX = -(2 * fingerWidth + 1.5 * gap);
+  for (let i = 0; i < 4; i++) {
+    const fx = startX + i * (fingerWidth + gap);
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(fx, -40 - fingerHeight, fingerWidth, fingerHeight, 8);
+    } else {
+      ctx.rect(fx, -40 - fingerHeight, fingerWidth, fingerHeight);
+    }
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Thumb
   ctx.beginPath();
-  ctx.roundRect(30, -20, 26, 40, 14);
+  if (ctx.roundRect) {
+    ctx.roundRect(30, -20, 26, 40, 14);
+  } else {
+    ctx.rect(30, -20, 26, 40);
+  }
   ctx.fill();
   ctx.stroke();
 
-  // Cursed energy outline glow
-  const glowGrad = ctx.createLinearGradient(-40, -80, 40, 40);
-  glowGrad.addColorStop(0, 'rgba(120,220,255,0.9)');
-  glowGrad.addColorStop(1, 'rgba(40,80,160,0.0)');
-  ctx.strokeStyle = glowGrad;
-  ctx.lineWidth = 5;
+  ctx.restore();
+}
+
+// Crosshair
+function drawCrosshair() {
+  const x = canvas.width / 2;
+  const y = canvas.height / 2;
+
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+
   ctx.beginPath();
-  ctx.roundRect(-44, -44 - fingerHeight, 88, 120, 26);
+  ctx.moveTo(x - 10, y);
+  ctx.lineTo(x + 10, y);
   ctx.stroke();
 
-  ctx.restore();
+  ctx.beginPath();
+  ctx.moveTo(x, y - 10);
+  ctx.lineTo(x, y + 10);
+  ctx.stroke();
 }
 
 // Main loop
@@ -490,11 +525,11 @@ function loop(now) {
   lastTime = now;
 
   updatePlayer(dt);
-
   drawArena();
   drawOrbs(dt);
   drawParticles(dt);
   drawHand(dt);
+  drawCrosshair();
 
   requestAnimationFrame(loop);
 }
