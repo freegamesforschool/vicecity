@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Vice-City-Style WebGL Demo (No Three.js)</title>
+  <title>Vice City-ish WebGL2 Demo</title>
   <style>
     html, body {
       margin: 0;
@@ -17,18 +17,24 @@
       top: 10px;
       left: 10px;
       z-index: 10;
-      background: rgba(0,0,0,0.5);
-      padding: 8px 12px;
-      border-radius: 6px;
+      background: rgba(0,0,0,0.55);
+      padding: 10px 14px;
+      border-radius: 8px;
       font-size: 13px;
+      box-shadow: 0 0 12px rgba(0,0,0,0.7);
+      border: 1px solid rgba(255,102,170,0.4);
     }
     #ui h1 {
       margin: 0 0 6px 0;
       font-size: 16px;
       color: #ff66aa;
+      text-shadow: 0 0 6px rgba(255,102,170,0.8);
     }
     #ui p {
       margin: 2px 0;
+    }
+    #ui .hint {
+      color: #9fdcff;
     }
     canvas {
       display: block;
@@ -37,17 +43,18 @@
 </head>
 <body>
 <div id="ui">
-  <h1>Vice City-ish WebGL</h1>
+  <h1>Vice City-ish WebGL2</h1>
   <p><b>Move on foot:</b> WASD</p>
-  <p><b>Turn:</b> Q/E</p>
+  <p><b>Turn:</b> Q / E</p>
   <p><b>Enter / Exit car:</b> F (near car)</p>
   <p><b>Camera:</b> Locked behind player or car</p>
+  <p class="hint">Very rough prototype, but fully 3D + chase cam.</p>
 </div>
 <canvas id="glcanvas"></canvas>
 
 <script>
 // =========================================================
-// Basic setup
+// Canvas & WebGL2 setup
 // =========================================================
 const canvas = document.getElementById("glcanvas");
 function resizeCanvas() {
@@ -57,26 +64,31 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
-const gl = canvas.getContext("webgl");
+// Request WebGL2 explicitly
+/** @type {WebGL2RenderingContext} */
+const gl = canvas.getContext("webgl2");
 if (!gl) {
-  alert("WebGL not supported");
+  alert("WebGL2 not supported in this browser.");
+  throw new Error("WebGL2 not supported");
 }
 
 // =========================================================
-// Simple shader sources
+// Shaders
 // =========================================================
-const vsSource = `
-attribute vec3 aPosition;
-attribute vec3 aNormal;
-attribute vec3 aColor;
+const vsSource = `#version 300 es
+precision highp float;
+
+in vec3 aPosition;
+in vec3 aNormal;
+in vec3 aColor;
 
 uniform mat4 uProjection;
 uniform mat4 uView;
 uniform mat4 uModel;
 
-varying vec3 vColor;
-varying vec3 vNormal;
-varying vec3 vWorldPos;
+out vec3 vColor;
+out vec3 vNormal;
+out vec3 vWorldPos;
 
 void main(void) {
   vec4 worldPos = uModel * vec4(aPosition, 1.0);
@@ -87,12 +99,12 @@ void main(void) {
 }
 `;
 
-const fsSource = `
-precision mediump float;
+const fsSource = `#version 300 es
+precision highp float;
 
-varying vec3 vColor;
-varying vec3 vNormal;
-varying vec3 vWorldPos;
+in vec3 vColor;
+in vec3 vNormal;
+in vec3 vWorldPos;
 
 uniform vec3 uLightDir;
 uniform vec3 uAmbientColor;
@@ -100,21 +112,21 @@ uniform vec3 uFogColor;
 uniform float uFogNear;
 uniform float uFogFar;
 
+out vec4 outColor;
+
 void main(void) {
   vec3 n = normalize(vNormal);
   float diff = max(dot(-uLightDir, n), 0.0);
-  vec3 base = vColor * (0.2 + diff * 0.8);
+  vec3 base = vColor * (0.25 + diff * 0.75);
 
   float dist = length(vWorldPos);
   float fogFactor = clamp((uFogFar - dist) / (uFogFar - uFogNear), 0.0, 1.0);
   vec3 color = mix(uFogColor, base, fogFactor);
 
-  gl_FragColor = vec4(color, 1.0);
+  outColor = vec4(color, 1.0);
 }
 `;
 
-// =========================================================
-// Shader compilation helpers
 // =========================================================
 function compileShader(src, type) {
   const shader = gl.createShader(type);
@@ -123,7 +135,7 @@ function compileShader(src, type) {
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     console.error(gl.getShaderInfoLog(shader));
     gl.deleteShader(shader);
-    return null;
+    throw new Error("Shader compile failed");
   }
   return shader;
 }
@@ -137,7 +149,7 @@ function createProgram(vsSrc, fsSrc) {
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
     console.error(gl.getProgramInfoLog(prog));
-    return null;
+    throw new Error("Program link failed");
   }
   return prog;
 }
@@ -166,7 +178,7 @@ const uniforms = {
 };
 
 // =========================================================
-// Minimal mat4 / vec3 utilities
+// Minimal math helpers
 // =========================================================
 function mat4Identity() {
   return [1,0,0,0,
@@ -290,7 +302,7 @@ function mat4LookAt(eye, center, up) {
 }
 
 // =========================================================
-// Geometry: simple cube
+// Geometry: cube
 // =========================================================
 function createCubeGeometry(color) {
   const c = color || [1,1,1];
@@ -361,7 +373,7 @@ function createCubeGeometry(color) {
 }
 
 // =========================================================
-// Create buffers
+// Mesh creation using WebGL2 VAOs
 // =========================================================
 function createMesh(geom) {
   const vao = gl.createVertexArray();
@@ -398,60 +410,60 @@ function createMesh(geom) {
 }
 
 // =========================================================
-// Scene objects
+// Scene setup
 // =========================================================
-const groundColor = [0.05, 0.12, 0.18];
-const buildingColor = [0.15, 0.4, 0.7];
-const carColor = [0.9, 0.1, 0.2];
-const playerColor = [0.9, 0.9, 0.2];
+const groundColor   = [0.05, 0.12, 0.18];
+const buildingColor = [0.18, 0.45, 0.8];
+const carColor      = [0.95, 0.15, 0.25];
+const playerColor   = [0.95, 0.95, 0.25];
 
-const cubeMeshGround = createMesh(createCubeGeometry(groundColor));
+const cubeMeshGround   = createMesh(createCubeGeometry(groundColor));
 const cubeMeshBuilding = createMesh(createCubeGeometry(buildingColor));
-const cubeMeshCar = createMesh(createCubeGeometry(carColor));
-const cubeMeshPlayer = createMesh(createCubeGeometry(playerColor));
+const cubeMeshCar      = createMesh(createCubeGeometry(carColor));
+const cubeMeshPlayer   = createMesh(createCubeGeometry(playerColor));
 
-// Generate a simple "city" grid of buildings
+// Simple city grid
 const buildings = [];
-for (let x = -5; x <= 5; x++) {
-  for (let z = -5; z <= 5; z++) {
+for (let x = -6; x <= 6; x++) {
+  for (let z = -6; z <= 6; z++) {
     if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.45) {
       buildings.push({
-        x: x * 8,
-        z: z * 8,
-        h: 4 + Math.random() * 20
+        x: x * 9,
+        z: z * 9,
+        h: 4 + Math.random() * 22
       });
     }
   }
 }
 
-// Player and car state
+// Player & car
 const player = {
   x: 0,
   y: 1,
   z: 0,
   rotY: 0,
   speed: 0,
-  maxSpeed: 0.15,
-  accel: 0.01,
-  friction: 0.9
+  maxSpeed: 0.16,
+  accel: 0.012,
+  friction: 0.88
 };
 
 const car = {
-  x: 10,
+  x: 12,
   y: 1,
-  z: -10,
+  z: -12,
   rotY: Math.PI * 0.25,
   speed: 0,
-  maxSpeed: 0.4,
-  accel: 0.02,
-  friction: 0.92
+  maxSpeed: 0.45,
+  accel: 0.025,
+  friction: 0.93
 };
 
 let inCar = false;
 
 // =========================================================
-// Input handling
+// Input
 // =========================================================
 const keys = {};
 window.addEventListener("keydown", (e) => {
@@ -462,7 +474,7 @@ window.addEventListener("keyup", (e) => {
 });
 
 // =========================================================
-// Camera logic: locked behind player or car
+// Movement & camera
 // =========================================================
 function getControlledEntity() {
   return inCar ? car : player;
@@ -471,15 +483,11 @@ function getControlledEntity() {
 function updateMovement() {
   const ent = getControlledEntity();
 
-  // Rotation with Q/E
-  if (keys["q"]) {
-    ent.rotY += 0.05;
-  }
-  if (keys["e"]) {
-    ent.rotY -= 0.05;
-  }
+  // Turn Q/E
+  if (keys["q"]) ent.rotY += 0.055;
+  if (keys["e"]) ent.rotY -= 0.055;
 
-  // Forward/back with W/S
+  // Forward/back W/S
   let forward = 0;
   if (keys["w"]) forward += 1;
   if (keys["s"]) forward -= 1;
@@ -497,27 +505,21 @@ function updateMovement() {
 
   ent.x += dx;
   ent.z += dz;
-
-  // Simple "stay above ground"
   ent.y = 1;
 
   // Enter / exit car with F
   if (keys["f"]) {
-    // Debounce-ish: only toggle when key first pressed
     if (!updateMovement._fPressed) {
       updateMovement._fPressed = true;
       if (!inCar) {
-        // Check distance to car
         const dist = Math.hypot(player.x - car.x, player.z - car.z);
         if (dist < 4) {
           inCar = true;
-          // Snap player to car
           player.x = car.x;
           player.z = car.z;
           player.rotY = car.rotY;
         }
       } else {
-        // Exit car: place player slightly behind car
         inCar = false;
         player.x = car.x - Math.sin(car.rotY) * 3;
         player.z = car.z - Math.cos(car.rotY) * 3;
@@ -532,21 +534,20 @@ function updateMovement() {
 function computeCamera() {
   const ent = getControlledEntity();
 
-  // Camera offset behind entity
-  const camDistance = inCar ? 12 : 8;
-  const camHeight = inCar ? 4 : 3;
+  const camDistance = inCar ? 13.0 : 8.5;
+  const camHeight   = inCar ? 4.2  : 3.0;
 
   const behindX = ent.x - Math.sin(ent.rotY) * camDistance;
   const behindZ = ent.z - Math.cos(ent.rotY) * camDistance;
-  const eye = [behindX, ent.y + camHeight, behindZ];
-  const center = [ent.x, ent.y + 1.5, ent.z];
-  const up = [0,1,0];
+  const eye     = [behindX, ent.y + camHeight, behindZ];
+  const center  = [ent.x, ent.y + 1.6, ent.z];
+  const up      = [0,1,0];
 
   return mat4LookAt(eye, center, up);
 }
 
 // =========================================================
-// Drawing helpers
+// Draw helpers
 // =========================================================
 function drawMesh(mesh, modelMatrix) {
   gl.uniformMatrix4fv(uniforms.model, false, new Float32Array(modelMatrix));
@@ -568,7 +569,7 @@ function render() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   const aspect = canvas.width / canvas.height;
-  const projection = mat4Perspective(Math.PI / 3, aspect, 0.1, 200.0);
+  const projection = mat4Perspective(Math.PI / 3, aspect, 0.1, 260.0);
   const view = computeCamera();
 
   gl.useProgram(program);
@@ -576,34 +577,34 @@ function render() {
   gl.uniformMatrix4fv(uniforms.view, false, new Float32Array(view));
 
   gl.uniform3fv(uniforms.lightDir, new Float32Array(vec3Normalize([0.3, 1.0, 0.5])));
-  gl.uniform3fv(uniforms.ambient, new Float32Array([0.1, 0.1, 0.15]));
+  gl.uniform3fv(uniforms.ambient,  new Float32Array([0.08, 0.08, 0.12]));
   gl.uniform3fv(uniforms.fogColor, new Float32Array([0.02, 0.03, 0.06]));
-  gl.uniform1f(uniforms.fogNear, 10.0);
-  gl.uniform1f(uniforms.fogFar, 120.0);
+  gl.uniform1f(uniforms.fogNear, 12.0);
+  gl.uniform1f(uniforms.fogFar,  180.0);
 
-  // Draw ground as a huge flat cube
+  // Ground
   let model = mat4Identity();
   model = mat4Translate(model, [0, -1, 0]);
-  model = mat4Scale(model, [200, 1, 200]);
+  model = mat4Scale(model, [220, 1, 220]);
   drawMesh(cubeMeshGround, model);
 
-  // Draw buildings
+  // Buildings
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
     let m = mat4Identity();
     m = mat4Translate(m, [b.x, b.h * 0.5, b.z]);
-    m = mat4Scale(m, [3, b.h * 0.5, 3]);
+    m = mat4Scale(m, [3.2, b.h * 0.5, 3.2]);
     drawMesh(cubeMeshBuilding, m);
   }
 
-  // Draw car
+  // Car
   let carModel = mat4Identity();
   carModel = mat4Translate(carModel, [car.x, car.y, car.z]);
   carModel = mat4RotateY(carModel, car.rotY);
-  carModel = mat4Scale(carModel, [1.5, 0.7, 3]);
+  carModel = mat4Scale(carModel, [1.7, 0.7, 3.4]);
   drawMesh(cubeMeshCar, carModel);
 
-  // Draw player (only when not in car, for clarity)
+  // Player (only when not in car)
   if (!inCar) {
     let pModel = mat4Identity();
     pModel = mat4Translate(pModel, [player.x, player.y, player.z]);
