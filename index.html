@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Vice City-ish WebGL2 Demo</title>
+  <title>Vice City-ish WebGL2 – Neon Night</title>
   <style>
     html, body {
       margin: 0;
       padding: 0;
       overflow: hidden;
-      background: #05070b;
+      background: #02030a;
       font-family: Arial, sans-serif;
       color: #eee;
     }
@@ -17,18 +17,19 @@
       top: 10px;
       left: 10px;
       z-index: 10;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.65);
       padding: 10px 14px;
       border-radius: 8px;
       font-size: 13px;
-      box-shadow: 0 0 12px rgba(0,0,0,0.7);
-      border: 1px solid rgba(255,102,170,0.4);
+      box-shadow: 0 0 18px rgba(0,0,0,0.9);
+      border: 1px solid rgba(255,102,170,0.6);
+      backdrop-filter: blur(4px);
     }
     #ui h1 {
       margin: 0 0 6px 0;
       font-size: 16px;
       color: #ff66aa;
-      text-shadow: 0 0 6px rgba(255,102,170,0.8);
+      text-shadow: 0 0 8px rgba(255,102,170,1);
     }
     #ui p {
       margin: 2px 0;
@@ -47,14 +48,14 @@
   <p><b>Move on foot:</b> WASD</p>
   <p><b>Turn:</b> Q / E</p>
   <p><b>Enter / Exit car:</b> F (near car)</p>
-  <p><b>Camera:</b> Locked behind player or car</p>
-  <p class="hint">Very rough prototype, but fully 3D + chase cam.</p>
+  <p><b>Camera:</b> Locked behind player or car (GTA-style)</p>
+  <p class="hint">Neon night, low-poly PS2 dude, collisions, drift.</p>
 </div>
 <canvas id="glcanvas"></canvas>
 
 <script>
 // =========================================================
-// Canvas & WebGL2 setup
+// Canvas & WebGL2
 // =========================================================
 const canvas = document.getElementById("glcanvas");
 function resizeCanvas() {
@@ -64,11 +65,10 @@ function resizeCanvas() {
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
 
-// Request WebGL2 explicitly
 /** @type {WebGL2RenderingContext} */
 const gl = canvas.getContext("webgl2");
 if (!gl) {
-  alert("WebGL2 not supported in this browser.");
+  alert("WebGL2 not supported");
   throw new Error("WebGL2 not supported");
 }
 
@@ -117,16 +117,19 @@ out vec4 outColor;
 void main(void) {
   vec3 n = normalize(vNormal);
   float diff = max(dot(-uLightDir, n), 0.0);
-  vec3 base = vColor * (0.25 + diff * 0.75);
+  vec3 lit = vColor * (0.25 + diff * 0.9);
+  lit += vec3(0.05, 0.02, 0.08); // tiny neon-ish boost
 
-  float dist = length(vWorldPos);
+  float dist = length(vWorldPos.xz);
   float fogFactor = clamp((uFogFar - dist) / (uFogFar - uFogNear), 0.0, 1.0);
-  vec3 color = mix(uFogColor, base, fogFactor);
+  vec3 color = mix(uFogColor, lit, fogFactor);
 
   outColor = vec4(color, 1.0);
 }
 `;
 
+// =========================================================
+// Shader helpers
 // =========================================================
 function compileShader(src, type) {
   const shader = gl.createShader(type);
@@ -158,7 +161,7 @@ const program = createProgram(vsSource, fsSource);
 gl.useProgram(program);
 
 // =========================================================
-// Attribute / uniform locations
+// Locations
 // =========================================================
 const attribs = {
   position: gl.getAttribLocation(program, "aPosition"),
@@ -178,7 +181,7 @@ const uniforms = {
 };
 
 // =========================================================
-// Minimal math helpers
+// Math helpers
 // =========================================================
 function mat4Identity() {
   return [1,0,0,0,
@@ -302,7 +305,7 @@ function mat4LookAt(eye, center, up) {
 }
 
 // =========================================================
-// Geometry: cube
+// Geometry
 // =========================================================
 function createCubeGeometry(color) {
   const c = color || [1,1,1];
@@ -373,7 +376,7 @@ function createCubeGeometry(color) {
 }
 
 // =========================================================
-// Mesh creation using WebGL2 VAOs
+// Mesh with VAO
 // =========================================================
 function createMesh(geom) {
   const vao = gl.createVertexArray();
@@ -410,29 +413,95 @@ function createMesh(geom) {
 }
 
 // =========================================================
-// Scene setup
+// Scene setup – Vice City-ish
 // =========================================================
-const groundColor   = [0.05, 0.12, 0.18];
-const buildingColor = [0.18, 0.45, 0.8];
-const carColor      = [0.95, 0.15, 0.25];
-const playerColor   = [0.95, 0.95, 0.25];
+const groundColor   = [0.02, 0.05, 0.10];
+const roadColor     = [0.03, 0.03, 0.05];
+const sidewalkColor = [0.10, 0.10, 0.16];
+const buildingColor1 = [0.9, 0.4, 0.8];
+const buildingColor2 = [0.3, 0.7, 1.0];
+const buildingColor3 = [0.9, 0.9, 0.4];
+const palmTrunkColor = [0.35, 0.20, 0.10];
+const palmLeafColor  = [0.1, 0.8, 0.4];
+const carColor       = [1.0, 0.2, 0.4];
+const playerBodyColor= [0.9, 0.8, 0.7];
+const playerShirtColor=[0.1, 0.7, 0.9];
+const playerPantsColor=[0.05, 0.05, 0.15];
 
-const cubeMeshGround   = createMesh(createCubeGeometry(groundColor));
-const cubeMeshBuilding = createMesh(createCubeGeometry(buildingColor));
-const cubeMeshCar      = createMesh(createCubeGeometry(carColor));
-const cubeMeshPlayer   = createMesh(createCubeGeometry(playerColor));
+const cubeGround   = createMesh(createCubeGeometry(groundColor));
+const cubeRoad     = createMesh(createCubeGeometry(roadColor));
+const cubeSidewalk = createMesh(createCubeGeometry(sidewalkColor));
+const cubeBuilding1= createMesh(createCubeGeometry(buildingColor1));
+const cubeBuilding2= createMesh(createCubeGeometry(buildingColor2));
+const cubeBuilding3= createMesh(createCubeGeometry(buildingColor3));
+const cubePalmTrunk= createMesh(createCubeGeometry(palmTrunkColor));
+const cubePalmLeaf = createMesh(createCubeGeometry(palmLeafColor));
+const cubeCar      = createMesh(createCubeGeometry(carColor));
+const cubePlayerBody = createMesh(createCubeGeometry(playerBodyColor));
+const cubePlayerShirt= createMesh(createCubeGeometry(playerShirtColor));
+const cubePlayerPants= createMesh(createCubeGeometry(playerPantsColor));
 
-// Simple city grid
+// City layout
 const buildings = [];
-for (let x = -6; x <= 6; x++) {
-  for (let z = -6; z <= 6; z++) {
-    if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
-    if (Math.random() < 0.45) {
-      buildings.push({
-        x: x * 9,
-        z: z * 9,
-        h: 4 + Math.random() * 22
-      });
+const roads = [];
+const sidewalks = [];
+const palms = [];
+
+const blockSize = 30;
+const halfBlocks = 4;
+
+// Generate grid: roads + blocks + buildings + palms
+for (let bx = -halfBlocks; bx <= halfBlocks; bx++) {
+  for (let bz = -halfBlocks; bz <= halfBlocks; bz++) {
+    const worldX = bx * blockSize;
+    const worldZ = bz * blockSize;
+
+    // Roads along X and Z
+    if (bx % 2 === 0 || bz % 2 === 0) {
+      roads.push({ x: worldX, z: worldZ });
+      // Sidewalks around roads
+      sidewalks.push({ x: worldX + 10, z: worldZ });
+      sidewalks.push({ x: worldX - 10, z: worldZ });
+      sidewalks.push({ x: worldX, z: worldZ + 10 });
+      sidewalks.push({ x: worldX, z: worldZ - 10 });
+    } else {
+      // Building block
+      const numBuildings = 3 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < numBuildings; i++) {
+        const offX = (Math.random() - 0.5) * 16;
+        const offZ = (Math.random() - 0.5) * 16;
+        const h = 6 + Math.random() * 30;
+        const colorPick = Math.random();
+        let mesh;
+        if (colorPick < 0.33) mesh = cubeBuilding1;
+        else if (colorPick < 0.66) mesh = cubeBuilding2;
+        else mesh = cubeBuilding3;
+        buildings.push({
+          mesh,
+          x: worldX + offX,
+          z: worldZ + offZ,
+          h,
+          w: 6 + Math.random() * 4,
+          d: 6 + Math.random() * 4
+        });
+      }
+
+      // Palms around edges of block
+      const palmCount = 4 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < palmCount; i++) {
+        const edge = Math.random();
+        let px = worldX + (edge < 0.5 ? -blockSize/2 + 3 : blockSize/2 - 3);
+        let pz = worldZ + (Math.random() - 0.5) * (blockSize - 8);
+        if (Math.random() < 0.5) {
+          px = worldX + (Math.random() - 0.5) * (blockSize - 8);
+          pz = worldZ + (edge < 0.5 ? -blockSize/2 + 3 : blockSize/2 - 3);
+        }
+        palms.push({
+          x: px,
+          z: pz,
+          h: 8 + Math.random() * 4
+        });
+      }
     }
   }
 }
@@ -444,9 +513,12 @@ const player = {
   z: 0,
   rotY: 0,
   speed: 0,
-  maxSpeed: 0.16,
+  maxSpeed: 0.18,
   accel: 0.012,
-  friction: 0.88
+  friction: 0.86,
+  radiusX: 0.6,
+  radiusZ: 0.6,
+  height: 1.8
 };
 
 const car = {
@@ -455,9 +527,12 @@ const car = {
   z: -12,
   rotY: Math.PI * 0.25,
   speed: 0,
-  maxSpeed: 0.45,
-  accel: 0.025,
-  friction: 0.93
+  maxSpeed: 0.55,
+  accel: 0.03,
+  friction: 0.93,
+  radiusX: 1.2,
+  radiusZ: 2.0,
+  height: 1.0
 };
 
 let inCar = false;
@@ -474,18 +549,59 @@ window.addEventListener("keyup", (e) => {
 });
 
 // =========================================================
+// Collision helpers (AABB vs buildings)
+// =========================================================
+function testAABBvsAABB(ax, ay, az, aw, ah, ad, bx, by, bz, bw, bh, bd) {
+  return (
+    Math.abs(ax - bx) * 2 < (aw + bw) &&
+    Math.abs(ay - by) * 2 < (ah + bh) &&
+    Math.abs(az - bz) * 2 < (ad + bd)
+  );
+}
+
+function resolveCollisions(ent) {
+  // Simple: if colliding with any building, push back along movement axis
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    const ex = ent.x;
+    const ez = ent.z;
+    const ey = ent.y + ent.height * 0.5;
+    const bw = b.w;
+    const bd = b.d;
+    const bh = b.h;
+
+    if (testAABBvsAABB(
+      ex, ey, ez, ent.radiusX*2, ent.height, ent.radiusZ*2,
+      b.x, bh*0.5, b.z, bw, bh, bd
+    )) {
+      // Push out on X/Z
+      const dx = ex - b.x;
+      const dz = ez - b.z;
+      if (Math.abs(dx) > Math.abs(dz)) {
+        ent.x = b.x + Math.sign(dx) * (bw/2 + ent.radiusX);
+        ent.speed *= 0.3;
+      } else {
+        ent.z = b.z + Math.sign(dz) * (bd/2 + ent.radiusZ);
+        ent.speed *= 0.3;
+      }
+    }
+  }
+}
+
+// =========================================================
 // Movement & camera
 // =========================================================
 function getControlledEntity() {
   return inCar ? car : player;
 }
 
-function updateMovement() {
+function updateMovement(dt) {
   const ent = getControlledEntity();
 
   // Turn Q/E
-  if (keys["q"]) ent.rotY += 0.055;
-  if (keys["e"]) ent.rotY -= 0.055;
+  const turnSpeed = inCar ? 2.2 : 1.8;
+  if (keys["q"]) ent.rotY += turnSpeed * dt;
+  if (keys["e"]) ent.rotY -= turnSpeed * dt;
 
   // Forward/back W/S
   let forward = 0;
@@ -495,17 +611,20 @@ function updateMovement() {
   if (forward !== 0) {
     ent.speed += forward * ent.accel;
     if (ent.speed > ent.maxSpeed) ent.speed = ent.maxSpeed;
-    if (ent.speed < -ent.maxSpeed * 0.5) ent.speed = -ent.maxSpeed * 0.5;
+    if (ent.speed < -ent.maxSpeed * 0.4) ent.speed = -ent.maxSpeed * 0.4;
   } else {
     ent.speed *= ent.friction;
   }
 
+  // Drift-ish: car has lower friction sideways (fake)
   const dx = Math.sin(ent.rotY) * ent.speed;
   const dz = Math.cos(ent.rotY) * ent.speed;
 
   ent.x += dx;
   ent.z += dz;
   ent.y = 1;
+
+  resolveCollisions(ent);
 
   // Enter / exit car with F
   if (keys["f"]) {
@@ -531,19 +650,38 @@ function updateMovement() {
   }
 }
 
-function computeCamera() {
+// Camera smoothing
+let camPos = { x: -10, y: 5, z: -10 };
+let camTarget = { x: 0, y: 2, z: 0 };
+
+function computeCamera(dt) {
   const ent = getControlledEntity();
 
-  const camDistance = inCar ? 13.0 : 8.5;
-  const camHeight   = inCar ? 4.2  : 3.0;
+  const camDistance = inCar ? 15.0 : 9.0;
+  const camHeight   = inCar ? 5.0  : 3.2;
 
-  const behindX = ent.x - Math.sin(ent.rotY) * camDistance;
-  const behindZ = ent.z - Math.cos(ent.rotY) * camDistance;
-  const eye     = [behindX, ent.y + camHeight, behindZ];
-  const center  = [ent.x, ent.y + 1.6, ent.z];
-  const up      = [0,1,0];
+  const targetX = ent.x;
+  const targetY = ent.y + 1.6;
+  const targetZ = ent.z;
 
-  return mat4LookAt(eye, center, up);
+  const behindX = targetX - Math.sin(ent.rotY) * camDistance;
+  const behindZ = targetZ - Math.cos(ent.rotY) * camDistance;
+  const behindY = targetY + camHeight;
+
+  const lerpFactor = 1.0 - Math.pow(0.001, dt * 60.0); // smooth but responsive
+  camPos.x += (behindX - camPos.x) * lerpFactor;
+  camPos.y += (behindY - camPos.y) * lerpFactor;
+  camPos.z += (behindZ - camPos.z) * lerpFactor;
+
+  camTarget.x += (targetX - camTarget.x) * lerpFactor;
+  camTarget.y += (targetY - camTarget.y) * lerpFactor;
+  camTarget.z += (targetZ - camTarget.z) * lerpFactor;
+
+  return mat4LookAt(
+    [camPos.x, camPos.y, camPos.z],
+    [camTarget.x, camTarget.y, camTarget.z],
+    [0,1,0]
+  );
 }
 
 // =========================================================
@@ -555,66 +693,145 @@ function drawMesh(mesh, modelMatrix) {
   gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
 }
 
+// Low-poly PS2 dude: body, head, legs, arms
+function drawPlayer() {
+  // Torso
+  let m = mat4Identity();
+  m = mat4Translate(m, [player.x, player.y + 1.0, player.z]);
+  m = mat4RotateY(m, player.rotY);
+  let part = mat4Scale(m, [0.6, 0.8, 0.3]);
+  drawMesh(cubePlayerShirt, part);
+
+  // Head
+  let head = mat4Translate(m, [0, 0.9, 0]);
+  head = mat4Scale(head, [0.4, 0.4, 0.4]);
+  drawMesh(cubePlayerBody, head);
+
+  // Legs
+  let legs = mat4Translate(m, [0, -0.7, 0]);
+  legs = mat4Scale(legs, [0.4, 0.8, 0.3]);
+  drawMesh(cubePlayerPants, legs);
+
+  // Arms (simple blocks)
+  let armL = mat4Translate(m, [-0.6, 0.3, 0]);
+  armL = mat4Scale(armL, [0.2, 0.7, 0.25]);
+  drawMesh(cubePlayerBody, armL);
+
+  let armR = mat4Translate(m, [0.6, 0.3, 0]);
+  armR = mat4Scale(armR, [0.2, 0.7, 0.25]);
+  drawMesh(cubePlayerBody, armR);
+}
+
+// Car
+function drawCar() {
+  let m = mat4Identity();
+  m = mat4Translate(m, [car.x, car.y, car.z]);
+  m = mat4RotateY(m, car.rotY);
+  m = mat4Scale(m, [1.6, 0.7, 3.2]);
+  drawMesh(cubeCar, m);
+}
+
+// Palms
+function drawPalm(p) {
+  // Trunk
+  let m = mat4Identity();
+  m = mat4Translate(m, [p.x, p.h * 0.5, p.z]);
+  m = mat4Scale(m, [0.4, p.h * 0.5, 0.4]);
+  drawMesh(cubePalmTrunk, m);
+
+  // Leaves (crossed)
+  let topY = p.h + 0.5;
+  let leafLen = 2.5;
+  for (let i = 0; i < 4; i++) {
+    let angle = (Math.PI / 2) * i;
+    let lm = mat4Identity();
+    lm = mat4Translate(lm, [p.x, topY, p.z]);
+    lm = mat4RotateY(lm, angle);
+    lm = mat4Translate(lm, [0, 0, leafLen * 0.5]);
+    lm = mat4Scale(lm, [0.3, 0.2, leafLen]);
+    drawMesh(cubePalmLeaf, lm);
+  }
+}
+
 // =========================================================
 // Main loop
 // =========================================================
-function render() {
-  requestAnimationFrame(render);
+let lastTime = performance.now();
 
-  updateMovement();
+function render(now) {
+  requestAnimationFrame(render);
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  updateMovement(dt);
 
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.enable(gl.DEPTH_TEST);
-  gl.clearColor(0.02, 0.03, 0.06, 1);
+  gl.clearColor(0.01, 0.01, 0.03, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   const aspect = canvas.width / canvas.height;
-  const projection = mat4Perspective(Math.PI / 3, aspect, 0.1, 260.0);
-  const view = computeCamera();
+  const projection = mat4Perspective(Math.PI / 3, aspect, 0.1, 400.0);
+  const view = computeCamera(dt);
 
   gl.useProgram(program);
   gl.uniformMatrix4fv(uniforms.projection, false, new Float32Array(projection));
   gl.uniformMatrix4fv(uniforms.view, false, new Float32Array(view));
 
-  gl.uniform3fv(uniforms.lightDir, new Float32Array(vec3Normalize([0.3, 1.0, 0.5])));
+  gl.uniform3fv(uniforms.lightDir, new Float32Array(vec3Normalize([0.4, 1.0, 0.3])));
   gl.uniform3fv(uniforms.ambient,  new Float32Array([0.08, 0.08, 0.12]));
-  gl.uniform3fv(uniforms.fogColor, new Float32Array([0.02, 0.03, 0.06]));
-  gl.uniform1f(uniforms.fogNear, 12.0);
-  gl.uniform1f(uniforms.fogFar,  180.0);
+  gl.uniform3fv(uniforms.fogColor, new Float32Array([0.01, 0.01, 0.05]));
+  gl.uniform1f(uniforms.fogNear, 25.0);
+  gl.uniform1f(uniforms.fogFar,  220.0);
 
   // Ground
   let model = mat4Identity();
   model = mat4Translate(model, [0, -1, 0]);
-  model = mat4Scale(model, [220, 1, 220]);
-  drawMesh(cubeMeshGround, model);
+  model = mat4Scale(model, [blockSize * (halfBlocks+2), 1, blockSize * (halfBlocks+2)]);
+  drawMesh(cubeGround, model);
+
+  // Roads
+  for (let i = 0; i < roads.length; i++) {
+    const r = roads[i];
+    let m = mat4Identity();
+    m = mat4Translate(m, [r.x, -0.49, r.z]);
+    m = mat4Scale(m, [blockSize * 0.5, 0.1, blockSize * 0.5]);
+    drawMesh(cubeRoad, m);
+  }
+
+  // Sidewalks
+  for (let i = 0; i < sidewalks.length; i++) {
+    const s = sidewalks[i];
+    let m = mat4Identity();
+    m = mat4Translate(m, [s.x, -0.3, s.z]);
+    m = mat4Scale(m, [4, 0.2, 4]);
+    drawMesh(cubeSidewalk, m);
+  }
 
   // Buildings
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
     let m = mat4Identity();
     m = mat4Translate(m, [b.x, b.h * 0.5, b.z]);
-    m = mat4Scale(m, [3.2, b.h * 0.5, 3.2]);
-    drawMesh(cubeMeshBuilding, m);
+    m = mat4Scale(m, [b.w, b.h * 0.5, b.d]);
+    drawMesh(b.mesh, m);
+  }
+
+  // Palms
+  for (let i = 0; i < palms.length; i++) {
+    drawPalm(palms[i]);
   }
 
   // Car
-  let carModel = mat4Identity();
-  carModel = mat4Translate(carModel, [car.x, car.y, car.z]);
-  carModel = mat4RotateY(carModel, car.rotY);
-  carModel = mat4Scale(carModel, [1.7, 0.7, 3.4]);
-  drawMesh(cubeMeshCar, carModel);
+  drawCar();
 
   // Player (only when not in car)
   if (!inCar) {
-    let pModel = mat4Identity();
-    pModel = mat4Translate(pModel, [player.x, player.y, player.z]);
-    pModel = mat4RotateY(pModel, player.rotY);
-    pModel = mat4Scale(pModel, [0.6, 1.8, 0.6]);
-    drawMesh(cubeMeshPlayer, pModel);
+    drawPlayer();
   }
 }
 
-render();
+render(performance.now());
 </script>
 </body>
 </html>
